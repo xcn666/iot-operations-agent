@@ -1,0 +1,9 @@
+# 密钥与本地配置
+config.py
+
+# RAG 索引(可本地重建)
+rag_index.json
+
+# Python 缓存
+__pycache__/
+*.pyc

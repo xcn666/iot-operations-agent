@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>物联网 AI 助手</title>
+<style>
+  :root{
+    --bg:#f5f8fd;
+    --surface:#ffffff;
+    --surface-2:#f9fbff;
+    --border:#e5ebf5;
+    --border-strong:#d5dfee;
+    --text:#0f1e35;
+    --text-2:#46586f;
+    --muted:#8093ab;
+    --primary:#2563eb;
+    --primary-2:#6355e8;
+    --cyan:#0891b2;
+    --amber:#d97706;
+    --green:#059669;
+    --rose:#e11d48;
+    --shadow-sm:0 1px 2px rgba(16,24,40,.05);
+    --shadow-md:0 6px 22px rgba(16,24,40,.07);
+    --shadow-lg:0 18px 46px rgba(16,24,40,.10);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%; overflow:hidden}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:"Inter",-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* 明亮活泼的背景色块 */
+  .glow{
+    position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      radial-gradient(720px 480px at 6% -10%, rgba(96,165,250,.20), transparent 68%),
+      radial-gradient(760px 520px at 96% -6%, rgba(167,139,250,.18), transparent 68%),
+      radial-gradient(880px 560px at 52% 112%, rgba(52,211,153,.13), transparent 70%);
+  }
+  .app{position:relative; z-index:1; display:grid; grid-template-columns:290px 1fr;
+       height:100vh; height:100dvh; overflow:hidden}
+
+  /* ============ 侧栏 ============ */
+  .sidebar{
+    border-right:1px solid var(--border); padding:22px 18px; display:flex; flex-direction:column; gap:16px;
+    background:var(--surface); min-height:0; overflow-y:auto;
+    box-shadow:2px 0 16px rgba(16,24,40,.03);
+  }
+  .brand{display:flex; align-items:center; gap:12px}
+  .logo{
+    width:44px;height:44px;border-radius:14px;display:grid;place-items:center;font-size:20px;color:#fff;
+    background:linear-gradient(135deg,#4f8cf7,#7c6cf0);
+    box-shadow:0 8px 20px rgba(79,140,247,.28);
+  }
+  .brand h1{font-size:16px;margin:0;letter-spacing:.2px}
+  .brand p{margin:3px 0 0;font-size:11.5px;color:var(--muted)}
+  .sec-title{font-size:11px;color:var(--muted);letter-spacing:1.4px;margin:6px 0 -6px;font-weight:600}
+
+  .cap{
+    display:flex; gap:11px; align-items:flex-start; padding:12px 13px; border-radius:14px;
+    background:var(--surface); border:1px solid var(--border); box-shadow:var(--shadow-sm);
+    transition:.2s;
+  }
+  .cap:hover{transform:translateY(-1px); box-shadow:var(--shadow-md); border-color:var(--border-strong)}
+  .cap .ico{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:15px;flex-shrink:0}
+  .ico-tool{background:#fff7e6; border:1px solid #ffe2ae}
+  .ico-doc{background:#e8f6fd; border:1px solid #c3e8f7}
+  .ico-chat{background:#eeeaff; border:1px solid #d8d0ff}
+  .cap b{font-size:12.5px;display:block;margin-bottom:2px;color:var(--text)}
+  .cap span{font-size:11px;color:var(--muted);line-height:1.5}
+
+  .sugg{
+    font-size:12.5px; padding:10px 13px; border-radius:12px; cursor:pointer; color:var(--text-2);
+    background:var(--surface); border:1px solid var(--border); box-shadow:var(--shadow-sm); transition:.18s;
+  }
+  .sugg:hover{background:#eef5ff; border-color:#bcd7ff; color:var(--primary); transform:translateX(3px)}
+  .side-foot{margin-top:auto; font-size:11px; color:var(--muted); line-height:1.8; padding-top:10px}
+  .dot-live{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:6px;
+            box-shadow:0 0 0 3px rgba(5,150,105,.14)}
+
+  /* ============ 主区 ============ */
+  .main{display:flex; flex-direction:column; min-width:0; min-height:0; height:100%}
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    padding:16px 26px; border-bottom:1px solid var(--border); background:rgba(255,255,255,.78);
+    backdrop-filter:blur(12px);
+  }
+  .topbar h2{margin:0;font-size:15px;font-weight:650}
+  .topbar .sub{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .top-actions{display:flex;align-items:center;gap:10px}
+  .pill{display:flex;align-items:center;gap:7px;font-size:11.5px;color:#057a55;
+        padding:6px 13px;border-radius:999px;background:#ecfdf5;border:1px solid #b8f0d8}
+  .btn-ghost{
+    font-size:12px;color:var(--text-2);padding:7px 15px;border-radius:11px;cursor:pointer;
+    background:#f1f5fb;border:1px solid var(--border-strong);transition:.18s;font-weight:500;
+  }
+  .btn-ghost:hover{border-color:#9dc4ff;color:var(--primary);background:#e8f1ff;transform:translateY(-1px)}
+
+  .chat{flex:1 1 auto; min-height:0; overflow-y:auto; padding:26px 26px 8px}
+  .chat::-webkit-scrollbar{width:9px}
+  .chat::-webkit-scrollbar-thumb{background:#cfdaea;border-radius:9px}
+  .chat::-webkit-scrollbar-track{background:transparent}
+  .sidebar::-webkit-scrollbar{width:7px}
+  .sidebar::-webkit-scrollbar-thumb{background:#dde5f0;border-radius:7px}
+
+  .row{display:flex; gap:12px; margin-bottom:20px; animation:fadeUp .38s ease both}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+  .row.user{flex-direction:row-reverse}
+  .av{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;font-size:13px;
+      flex-shrink:0;font-weight:600}
+  .av.ai{color:#fff;background:linear-gradient(135deg,#4f8cf7,#7c6cf0);box-shadow:0 6px 16px rgba(79,140,247,.26)}
+  .av.me{color:#fff;background:linear-gradient(135deg,#34c0a0,#3aa8d8);box-shadow:0 6px 16px rgba(52,192,160,.24)}
+  .bubble-wrap{max-width:min(780px,86%)}
+  .bubble{
+    padding:13px 17px;border-radius:16px;font-size:14px;line-height:1.75;white-space:pre-wrap;
+    background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-sm);color:var(--text-2);
+  }
+  .row.user .bubble{color:#fff;border:none;background:linear-gradient(135deg,#4f8cf7,#6f7bf0);
+                    box-shadow:0 8px 22px rgba(79,140,247,.24)}
+  .bubble b{color:var(--text)}
+  .row.user .bubble b{color:#fff}
+  .bubble code{background:#eef3fb;padding:2px 7px;border-radius:6px;font-size:12.5px;color:#1d4ed8}
+
+  /* 欢迎区 */
+  .welcome{padding:4px 2px}
+  .welcome h3{margin:0 0 8px;font-size:17px;font-weight:680;color:var(--text)}
+  .welcome p{margin:0 0 16px;font-size:13px;color:var(--muted);line-height:1.8}
+  .quick{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px}
+  .qcard{
+    padding:14px 16px;border-radius:14px;cursor:pointer;transition:.2s;background:var(--surface-2);
+    border:1px solid var(--border);
+  }
+  .qcard:hover{background:#eef5ff;border-color:#bcd7ff;transform:translateY(-2px);box-shadow:var(--shadow-md)}
+  .qcard .t{font-size:12.5px;color:var(--text);margin-bottom:5px;font-weight:600}
+  .qcard .d{font-size:11px;color:var(--muted)}
+
+  /* 决策徽章 */
+  .trace{
+    display:inline-flex;align-items:center;gap:7px;margin-top:9px;font-size:11.5px;
+    padding:5px 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface-2);color:var(--muted);
+    max-width:100%; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+  }
+  .trace.tool{border-color:#ffe0a8;color:#a15c07;background:#fff8ec}
+  .trace.doc{border-color:#bfe6f5;color:#0b6e87;background:#ecf8fd}
+  .trace.chat{border-color:#d5cfff;color:#4f3fd6;background:#f1eeff}
+
+  /* 输入中动画 */
+  .typing{display:flex;gap:5px;padding:4px 2px}
+  .typing i{width:7px;height:7px;border-radius:50%;background:#9fb2c9;display:block;animation:bounce 1.2s infinite}
+  .typing i:nth-child(2){animation-delay:.15s}
+  .typing i:nth-child(3){animation-delay:.3s}
+  @keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.45}30%{transform:translateY(-5px);opacity:1}}
+
+  /* 输入区 */
+  .composer{flex-shrink:0; padding:14px 26px 22px}
+  .composer-inner{
+    display:flex;align-items:flex-end;gap:10px;padding:10px 12px;border-radius:18px;
+    background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-md);transition:.2s;
+  }
+  .composer-inner:focus-within{border-color:#9dc4ff;box-shadow:0 0 0 4px rgba(37,99,235,.10),var(--shadow-md)}
+  textarea{
+    flex:1;resize:none;border:none;outline:none;background:transparent;color:var(--text);
+    font-size:14px;line-height:1.6;max-height:150px;min-height:24px;padding:8px 6px;font-family:inherit;
+  }
+  textarea::placeholder{color:#a8b7c9}
+  .send{
+    width:42px;height:42px;border-radius:13px;border:none;cursor:pointer;color:#fff;font-size:16px;
+    background:linear-gradient(135deg,#4f8cf7,#7c6cf0);display:grid;place-items:center;transition:.18s;flex-shrink:0;
+    box-shadow:0 8px 20px rgba(79,140,247,.30);
+  }
+  .send:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 12px 26px rgba(79,140,247,.38)}
+  .send:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+  .foot-hint{text-align:center;font-size:11.5px;color:var(--muted);margin-top:9px}
+
+  @media(max-width:900px){
+    .app{grid-template-columns:1fr}
+    .sidebar{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">◈</div>
+      <div>
+        <h1>物联网 AI 助手</h1>
+        <p>RAG + Function Calling</p>
+      </div>
+    </div>
+
+    <div class="sec-title">能力</div>
+    <div class="cap">
+      <div class="ico ico-tool">⚙️</div>
+      <div><b>数据查询</b><span>自然语言查传感器数据（SQLite）</span></div>
+    </div>
+    <div class="cap">
+      <div class="ico ico-doc">📚</div>
+      <div><b>文档问答</b><span>检索项目文档（RAG 向量检索）</span></div>
+    </div>
+    <div class="cap">
+      <div class="ico ico-chat">💬</div>
+      <div><b>通用对话</b><span>闲聊与通用知识问答</span></div>
+    </div>
+
+    <div class="sec-title">试试问</div>
+    <div class="sugg" data-q="昨天最高温度是多少？">昨天最高温度是多少？</div>
+    <div class="sugg" data-q="最近有哪些告警？">最近有哪些告警？</div>
+    <div class="sugg" data-q="告警抑制是怎么实现的？">告警抑制是怎么实现的？</div>
+    <div class="sugg" data-q="项目用了什么数据库？">项目用了什么数据库？</div>
+
+    <div class="side-foot">
+      <span class="dot-live"></span>服务在线<br>
+      LLM: GLM-4-Flash · Embedding: 2048 维
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h2>对话</h2>
+        <div class="sub">AI 会自动判断该查数据、查文档还是直接回答</div>
+      </div>
+      <div class="top-actions">
+        <div class="pill"><span class="dot-live"></span>就绪</div>
+        <button class="btn-ghost" onclick="clearChat()">清空对话</button>
+      </div>
+    </div>
+
+    <div class="chat" id="chat"></div>
+
+    <div class="composer">
+      <div class="composer-inner">
+        <textarea id="q" rows="1" placeholder="输入问题…（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button class="send" id="send" onclick="send()">➤</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const chat = document.getElementById('chat');
+const input = document.getElementById('q');
+const btn = document.getElementById('send');
+
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmt(s){
+  return esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`(.+?)`/g,'<code>$1</code>');
+}
+function toBottom(){ chat.scrollTop = chat.scrollHeight; }
+
+function addRow(role, html, trace){
+  const row = document.createElement('div');
+  row.className = 'row ' + (role === 'user' ? 'user' : 'ai');
+  const av = role === 'user' ? 'me' : 'ai';
+  const avText = role === 'user' ? '你' : 'AI';
+  row.innerHTML =
+    '<div class="av ' + av + '">' + avText + '</div>' +
+    '<div class="bubble-wrap"><div class="bubble">' + html + '</div>' +
+    (trace ? trace : '') + '</div>';
+  chat.appendChild(row);
+  toBottom();
+  return row;
+}
+
+function traceHTML(t){
+  if(!t || !t.action) return '';
+  if(t.action === 'tool'){
+    return '<div class="trace tool">⚙️ 调用工具 <b>' + esc(t.tool) + '</b>' +
+      (t.args ? '　参数 ' + esc(JSON.stringify(t.args)) : '') + '</div>';
+  }
+  if(t.action === 'doc'){
+    const scores = (t.sources||[]).map(s => s.score).join(' / ');
+    return '<div class="trace doc">📚 检索项目文档　Top-K 相似度 ' + esc(scores) + '</div>';
+  }
+  return '<div class="trace chat">💬 直接回答（未调用工具）</div>';
+}
+
+function typingRow(){
+  const row = document.createElement('div');
+  row.className = 'row ai';
+  row.innerHTML = '<div class="av ai">AI</div><div class="bubble-wrap"><div class="bubble">' +
+    '<div class="typing"><i></i><i></i><i></i></div></div></div>';
+  chat.appendChild(row); toBottom();
+  return row;
+}
+
+async function send(text){
+  const q = (text !== undefined ? text : input.value).trim();
+  if(!q) return;
+  input.value = ''; input.style.height = 'auto';
+  addRow('user', fmt(q));
+  const t = typingRow();
+  btn.disabled = true;
+  try{
+    const res = await fetch('/api/chat', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({question:q})
+    });
+    const data = await res.json();
+    chat.removeChild(t);
+    addRow('ai', fmt(data.answer || '(无回答)'), traceHTML(data.trace));
+  }catch(e){
+    chat.removeChild(t);
+    addRow('ai', '出错了：' + esc(String(e)));
+  }finally{
+    btn.disabled = false; input.focus();
+  }
+}
+
+function clearChat(){ chat.innerHTML = ''; greet(); }
+
+function greet(){
+  const row = document.createElement('div');
+  row.className = 'row ai';
+  row.innerHTML =
+    '<div class="av ai">AI</div>' +
+    '<div class="bubble-wrap" style="max-width:100%"><div class="bubble welcome">' +
+      '<h3>你好，我是物联网 AI 助手 👋</h3>' +
+      '<p>我能在两类数据上工作，并会自动选择合适的处理方式：<br>' +
+      '· <b>传感器数据</b> —— 查询 SQLite 数据库（Function Calling）<br>' +
+      '· <b>项目文档</b> —— RAG 向量检索后回答</p>' +
+      '<div class="quick">' +
+        '<div class="qcard" data-q="昨天最高温度是多少？"><div class="t">⚙️ 昨天最高温度是多少？</div><div class="d">查询传感器数据库</div></div>' +
+        '<div class="qcard" data-q="最近有哪些告警？"><div class="t">⚙️ 最近有哪些告警？</div><div class="d">查询告警记录</div></div>' +
+        '<div class="qcard" data-q="告警抑制是怎么实现的？"><div class="t">📚 告警抑制是怎么实现的？</div><div class="d">检索项目文档</div></div>' +
+        '<div class="qcard" data-q="项目用了什么数据库？"><div class="t">📚 项目用了什么数据库？</div><div class="d">检索项目文档</div></div>' +
+      '</div>' +
+    '</div></div>';
+  chat.appendChild(row);
+  row.querySelectorAll('.qcard').forEach(el => {
+    el.addEventListener('click', () => send(el.dataset.q));
+  });
+}
+
+input.addEventListener('keydown', e => {
+  if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }
+});
+input.addEventListener('input', () => {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 150) + 'px';
+});
+document.querySelectorAll('.sugg').forEach(el => {
+  el.addEventListener('click', () => send(el.dataset.q));
+});
+
+greet();
+</script>
+</body>
+</html>
