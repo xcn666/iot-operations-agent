@@ -1,105 +1,156 @@
-# 物联网 AI 助手（IoT AI Assistant）
+# IoT Operations Agent
 
-一个基于大模型的**物联网智能助手**：支持用自然语言查询传感器数据（**Function Calling**）和项目文档问答（**RAG**），并能自动判断该用哪种能力。
+面向 ESP32 温湿度设备的**多步 Agent**。它不再只是“把问题路由到某个接口”，而是会拆解任务、逐步选择工具、检查执行结果，并在写操作前暂停等待用户确认。
 
 ![演示](docs/demo.png)
 
-## ✨ 功能特性
+## 核心能力
 
-- **意图路由**：由 LLM 自动判断问题类型，无需用户选择功能
-  - 问「昨天最高温度是多少」→ 走 **Function Calling** 查数据库
-  - 问「告警抑制是怎么实现的」→ 走 **RAG** 检索项目文档
-  - 闲聊/通用问题 → 直接回答
-- **Function Calling（工具调用）**：把自然语言转成 SQL 查询，读取真实传感器数据
-- **RAG（检索增强生成）**：项目文档切分 → Embedding 向量化（2048 维）→ 余弦相似度检索 → 交给 LLM 生成回答，并支持「资料中没有提到」的**幻觉控制**
-- **可解释的决策过程**：界面实时显示本轮是「调用了工具 / 检索了文档 / 直接回答」，便于调试与演示
-- **健壮的输出解析**：针对中文大模型输出的不可靠性做了多层容错
+- **多步决策**：Planner 每一步只选择一个动作，读取工具结果后继续规划，直到能够给出结论。
+- **原生 Function Calling**：优先使用 GLM 的 `tools/tool_calls` 接口；不支持时回退到结构化 JSON 规划。
+- **状态持久化**：SQLite 保存会话、每一步决策、工具输入输出、错误和耗时。
+- **安全边界**：写操作必须二次确认；默认数据库连接为只读；最多执行 8 步；重复调用会被熔断。
+- **可解释 Trace**：前端展示工具选择、调用结果和耗时，不展示模型私有思维链。
+- **安全评估**：内置 20 条任务的数据集，可统计任务成功率、平均步数、P95 延迟和危险写操作拦截情况。
+- **确定性快路径**：明确的计数、趋势、文档问题直接执行固定工具；模糊和多意图任务仍由 LLM 选择工具。
 
-## 🏗️ 系统架构
+## 工具
 
-```
-                       ┌──────────────────────────────┐
-   用户提问  ──────────> │  意图路由（LLM 判断 action）    │
-                       └──────────────┬───────────────┘
-                                      │
-          ┌───────────────────────────┼───────────────────────────┐
-          ▼                           ▼                           ▼
-  action="tool"                action="doc"                 action="chat"
-  查传感器数据库                 检索项目文档                   直接回答
-  ┌──────────────┐            ┌──────────────┐            ┌──────────────┐
-  │ Function     │            │ RAG          │            │ LLM 通用对话  │
-  │ Calling      │            │ Embedding +  │            │              │
-  │ → SQLite     │            │ 余弦相似度检索 │            │              │
-  └──────┬───────┘            └──────┬───────┘            └──────┬───────┘
-         └───────────────────────────┼───────────────────────────┘
-                                     ▼
-                           LLM 组织语言 → 返回回答
-```
+| 工具 | 权限 | 说明 |
+|---|---|---|
+| `get_sensor_stats` | read | 查询最高、最低、平均或数据条数 |
+| `get_sensor_readings` | read | 查询原始传感器记录 |
+| `analyze_trend` | read | 计算趋势、极值、平均值和阈值异常数 |
+| `list_alerts` | read | 查询最近告警 |
+| `search_iot_docs` | read | RAG 检索项目文档 |
+| `create_alert_rule` | write | 创建告警规则，需要确认 |
+| `send_notification` | write | 发送 Webhook 通知，需要确认 |
 
-## 🛠️ 技术栈
+## 运行流程
 
-| 类别 | 技术 |
-|------|------|
-| 大模型 | 智谱 GLM-4-Flash（OpenAI 兼容接口，可切换 DeepSeek / 通义千问） |
-| Embedding | 智谱 embedding-3（2048 维向量） |
-| 检索 | 余弦相似度（纯 Python 实现，无第三方依赖） |
-| 后端 | Python 3.10 · Flask · requests |
-| 数据源 | SQLite（IoT 传感器数据库） |
-| 前端 | 原生 HTML/CSS/JS（深色科技风） |
-
-## 📁 目录结构
-
-```
-iot-ai-assistant/
-├── app.py                  # 主程序：Flask 服务 + 意图路由 + 工具调用 + RAG
-├── build_index.py          # 构建 RAG 索引（文档切分 + 向量化）
-├── config.example.py       # API 配置模板（复制为 config.py 并填 Key）
-├── requirements.txt        # 依赖
-├── docs/demo.png           # 界面演示截图
-└── learning/               # 学习过程代码（API 调用 → 结构化输出 → 工具调用 → RAG）
+```text
+用户任务
+   ↓
+Planner 选择下一步
+   ↓
+Executor 验证参数并执行工具
+   ↓
+Verifier 检查动作是否合法
+   ↓
+写操作？── 是 → 用户确认 / 拒绝
+   │
+  否
+   ↓
+检查工具结果 → 继续规划或输出结论
 ```
 
-## 🚀 快速开始
+## 快速开始
 
 ```bash
-# 1. 安装依赖
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. 配置 API Key
 cp config.example.py config.py
-# 编辑 config.py，填入你的 API Key（智谱 GLM-4-Flash 可免费申请）
+# 填入智谱 API Key
 
-# 3. 构建 RAG 索引（读取被检索的文档，默认 ~/iot-lab/README.md）
 python3 build_index.py
-
-# 4. 启动
 python3 app.py
-# 浏览器打开 http://localhost:5001
 ```
 
-## 💡 关键技术点（面试可展开）
+打开 `http://localhost:5001`。
 
-1. **LLM 与代码分工原则**：确定性逻辑（阈值比较、数据查询）交给代码，模糊任务（意图理解、文案生成）交给 LLM
-   - *踩坑记录*：曾让 LLM 判断温度是否超阈值，36°C 对比阈值 40°C 却判定为「异常」——因为 LLM 是模式匹配而非计算器。改为「LLM 只提取数值，代码做判断」后彻底解决
-2. **模型输出容错解析**：四层策略——标准 JSON → 提取花括号内容 → Python 字面量 → 正则兜底；并做全角标点归一化
-   - *踩坑记录*：模型输出单引号 `{'action':'tool'}`、中文全角引号 `“action”` 都会导致 `json.loads` 失败
-3. **Prompt 上下文注入**：把「今天 / 昨天」的真实日期注入 prompt，模型才能正确完成日期换算（否则会输出 `{{yesterday}}` 之类的占位符）
-4. **RAG 幻觉控制**：Prompt 中明确要求「只依据资料回答，资料中没有就说没有」
-5. **意图路由设计**：用一次 LLM 调用产出结构化决策（action/tool/args），实现「一个入口，多种能力」
+也可以使用环境变量而不是 `config.py`：
 
-## 🔭 后续计划
+```bash
+export GLM_API_KEY="..."
+export GLM_API_URL="https://open.bigmodel.cn/api/paas/v4/chat/completions"
+export GLM_MODEL="glm-4-flash"
+export IOT_DB_PATH="$HOME/iot-lab/logs/sensor.db"
+```
 
-- [ ] 支持多轮对话与上下文记忆
-- [ ] 扩展工具：生成日报、写入告警、控制设备（继电器）
-- [ ] 改用原生 Function Calling（`tools` 参数）替代 prompt 方式，提升可靠性
-- [ ] 增加对话历史持久化与用户会话管理
-- [ ] 部署到云服务器，支持公网访问
+## Docker
 
-## 🔗 相关项目
+```bash
+export GLM_API_KEY="..."
+docker compose up --build
+```
 
-- **物联网温湿度监测系统**（ESP32 + MQTT + SQLite + 可视化大屏）
-  https://github.com/XCN666/iot-monitor
+默认将 `./data` 作为 Agent 运行数据目录。需要完整使用传感器工具时，将 `sensor.db` 放入 `data/`，或修改 `IOT_DB_PATH`。
 
-## 👤 作者
+## API
 
-徐钏楠 · 2026
+```bash
+curl -X POST http://localhost:5001/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"先看最近3条读数，再分析温度趋势"}'
+```
+
+返回字段：
+
+- `session_id`：后续对话使用的会话 ID；
+- `status`：`completed`、`awaiting_confirmation`、`needs_input` 或 `failed`；
+- `answer`：最终回答；
+- `pending_action`：待确认写操作；
+- `trace`：工具调用和执行结果。
+
+确认或拒绝写操作：
+
+```bash
+curl -X POST http://localhost:5001/api/confirm \
+  -H 'Content-Type: application/json' \
+  -d '{"token":"TOKEN"}'
+
+curl -X POST http://localhost:5001/api/reject \
+  -H 'Content-Type: application/json' \
+  -d '{"token":"TOKEN"}'
+```
+
+## 测试
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+覆盖内容包括：JSON Schema 参数校验、未确认写操作拦截、多步工具执行、确认后写入、重复调用熔断。
+
+## 评估
+
+```bash
+python3 eval/run_eval.py
+```
+
+详细结果输出到 `eval/results.json`。本仓库最新一次真实模型评估见 `eval/RESULTS.md`。指标包括：
+
+- Task Success Rate
+- Average Tool Steps
+- P95 Latency
+- Write Actions Executed Without Confirmation
+
+评估集位于 `eval/tasks.jsonl`，建议继续扩展到 30 条以上，并增加真实失败案例。
+
+## 项目结构
+
+```text
+iot_agent/
+├── llm.py        # LLM / Embedding / 原生 Function Calling
+├── models.py     # 会话状态与步骤模型
+├── planner.py    # Planner
+├── runtime.py    # Executor / Verifier / Agent 主循环
+├── settings.py   # 环境配置
+├── storage.py    # SQLite 会话与待确认操作
+├── tools.py      # 工具契约与 Schema 校验
+└── web.py        # Flask API
+eval/
+├── run_eval.py
+└── tasks.jsonl
+tests/
+└── test_agent.py
+```
+
+## 当前限制
+
+- RAG 仍使用本地内存余弦检索，适合小规模文档；下一步可替换为向量数据库和重排序。
+- 评估集规模仍较小，需要继续补充真实设备异常、工具失败和 Prompt Injection 场景。
+- 多用户鉴权、速率限制和生产级可观测性尚未完成。
+- 发送通知依赖 `/app/data/notify_config.json` 或本机 `notify_config.json` 中的 Webhook 配置。

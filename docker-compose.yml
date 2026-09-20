@@ -1,0 +1,15 @@
+services:
+  iot-agent:
+    build: .
+    ports:
+      - "5001:5001"
+    environment:
+      GLM_API_KEY: ${GLM_API_KEY}
+      GLM_API_URL: ${GLM_API_URL:-https://open.bigmodel.cn/api/paas/v4/chat/completions}
+      GLM_MODEL: ${GLM_MODEL:-glm-4-flash}
+      IOT_DB_PATH: /app/data/sensor.db
+      IOT_AGENT_DB: /app/data/agent.db
+      IOT_RAG_INDEX: /app/rag_index.json
+      IOT_NOTIFY_CONFIG: /app/data/notify_config.json
+    volumes:
+      - ./data:/app/data

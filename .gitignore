@@ -7,3 +7,12 @@ rag_index.json
 # Python 缓存
 __pycache__/
 *.pyc
+
+# Agent runtime data and evaluation output
+data/*.db
+data/*.db-*
+eval/results*.json
+
+# local virtual environments
+.venv/
+venv/
