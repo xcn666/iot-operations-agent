@@ -58,6 +58,8 @@ cp config.example.py config.py
 
 python3 build_index.py
 python3 app.py
+
+`build_index.py` 默认索引仓库内的 `docs/knowledge/`；可通过 `--doc <path>` 指定其他 Markdown/TXT 文件或目录。
 ```
 
 打开 `http://localhost:5001`。
@@ -114,7 +116,7 @@ curl -X POST http://localhost:5001/api/reject \
 python3 -m unittest discover -s tests -v
 ```
 
-覆盖内容包括：JSON Schema 参数校验、未确认写操作拦截、多步工具执行、确认后写入、重复调用熔断。
+覆盖内容包括：JSON Schema 参数校验、未确认写操作拦截、多步工具执行、确认后写入、重复调用熔断，以及文档分块、索引元数据和混合检索排序。
 
 ## 评估
 
@@ -137,7 +139,7 @@ RAG 检索单独评测：
 python3 eval/run_rag_eval.py
 ```
 
-最新结果见 `eval/RAG_RESULTS.md`：在 10 条人工标注问题上，`Recall@3 = 80%`，`MRR = 0.6333`。该结果用于开发期回归，不代表生产环境检索质量。
+最新结果见 `eval/RAG_RESULTS.md`：在 35 条人工标注问题上，`Recall@3 = 35/35`，`Top-1 Accuracy = 30/35 (85.7%)`，`MRR = 0.919`。该结果用于开发期回归，不代表生产环境检索质量。
 
 ## 项目结构
 
@@ -157,13 +159,16 @@ eval/
 ├── run_rag_eval.py
 ├── rag_tasks.jsonl
 └── RAG_RESULTS.md
+docs/knowledge/
+└── iot-monitor.md
 tests/
-└── test_agent.py
+├── test_agent.py
+└── test_build_index.py
 ```
 
 ## 当前限制
 
-- RAG 仍使用本地内存余弦检索，适合小规模文档；下一步可替换为向量数据库和重排序。
+- RAG 使用本地内存向量与 IDF 加权关键词混合检索，适合小规模文档；下一步可替换为向量数据库和重排序。
 - 评估集规模仍较小，需要继续补充真实设备异常、工具失败和 Prompt Injection 场景。
 - 多用户鉴权、速率限制和生产级可观测性尚未完成。
 - 发送通知依赖 `/app/data/notify_config.json` 或本机 `notify_config.json` 中的 Webhook 配置。

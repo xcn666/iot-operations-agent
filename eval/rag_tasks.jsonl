@@ -1,10 +1,35 @@
-{"id":"mqtt-reconnect","query":"MQTT 断线之后怎么重连？","expected_ids":[2,29]}
-{"id":"alert-cooldown","query":"告警冷却机制怎么避免告警风暴？","expected_ids":[2,29]}
-{"id":"database-tables","query":"项目使用什么数据库，保存了哪些表？","expected_ids":[1,2,12]}
-{"id":"hardware-capture","query":"真实硬件如何采集温湿度？","expected_ids":[1,10,22]}
-{"id":"wifi-mqtt-upload","query":"ESP32 怎样通过 WiFi 和 MQTT 上报数据？","expected_ids":[1,5,20]}
-{"id":"webhook-alert","query":"告警如何推送到钉钉或企业微信？","expected_ids":[2,18,25]}
-{"id":"offline-resend","query":"断网期间数据如何缓存和恢复补发？","expected_ids":[2,29]}
-{"id":"mqtt-semantics","query":"MQTT 使用了哪些主题、QoS 或遗嘱消息设计？","expected_ids":[28]}
-{"id":"dht11-wiring","query":"DHT11 的接线和 GPIO 是什么？","expected_ids":[10,11,22]}
-{"id":"dashboard-content","query":"Flask 和 Chart.js 大屏展示哪些内容？","expected_ids":[1,2,12,20]}
+{"id":"hardware-capture","query":"真实硬件如何采集温湿度？","expected_ids":[0,1,18]}
+{"id":"wifi-mqtt-upload","query":"ESP32 怎样通过 WiFi 和 MQTT 上报数据？","expected_ids":[0,1,18]}
+{"id":"simulated-device","query":"没有硬件时能否使用模拟设备？","expected_ids":[1,5,6]}
+{"id":"database-tables","query":"项目使用什么数据库，保存了哪些表？","expected_ids":[1,23]}
+{"id":"dashboard-content","query":"Flask 和 Chart.js 大屏展示哪些内容？","expected_ids":[0,1]}
+{"id":"alert-features","query":"告警系统有哪些功能？","expected_ids":[2,23]}
+{"id":"mqtt-reconnect","query":"MQTT 断线之后怎么重连？","expected_ids":[2,23]}
+{"id":"offline-resend","query":"断网期间数据如何缓存和恢复补发？","expected_ids":[2,23]}
+{"id":"data-export","query":"支持哪些数据导出和日报功能？","expected_ids":[2,20,21]}
+{"id":"end-to-end-architecture","query":"项目从传感器到网页的数据链路是怎样的？","expected_ids":[0,3,4,5,6,22]}
+{"id":"broker-dashboard","query":"云端 Broker 和 Flask 大屏如何连接？","expected_ids":[3,4,5,6,9]}
+{"id":"hardware-list","query":"项目需要哪些硬件元件？","expected_ids":[7]}
+{"id":"dht11-wiring","query":"DHT11 如何接线？","expected_ids":[8,18]}
+{"id":"led-wiring","query":"外接 LED 的接线是什么？","expected_ids":[8]}
+{"id":"device-stack","query":"设备端使用了哪些技术？","expected_ids":[8,9]}
+{"id":"message-middleware","query":"项目使用了哪几种 MQTT Broker？","expected_ids":[9,16]}
+{"id":"database-technology","query":"服务端数据存储使用什么技术？","expected_ids":[9,23]}
+{"id":"server-stack","query":"服务端使用什么语言和框架？","expected_ids":[9]}
+{"id":"development-environment","query":"项目的推荐开发环境是什么？","expected_ids":[10]}
+{"id":"directory-main-app","query":"设备端主程序和 MQTT 客户端库分别是什么文件？","expected_ids":[11,12]}
+{"id":"dashboard-file","query":"网页大屏由哪个文件实现？","expected_ids":[12,13]}
+{"id":"server-run-command","query":"如何启动网页大屏？","expected_ids":[16]}
+{"id":"simulator-run-command","query":"如何启动本地 Broker、模拟设备和数据采集？","expected_ids":[16,17]}
+{"id":"device-setup","query":"ESP32 上传程序和配置 WiFi 的步骤是什么？","expected_ids":[17,18]}
+{"id":"dht11-gpio","query":"DHT11 的 DATA 引脚接到哪个 GPIO？","expected_ids":[18]}
+{"id":"query-database","query":"如何使用命令行查看数据库统计或告警记录？","expected_ids":[20]}
+{"id":"log-filter","query":"如何实时过滤告警和推送日志？","expected_ids":[21]}
+{"id":"sensor-to-cloud","query":"端到端链路设计包含哪些部分？","expected_ids":[0,22]}
+{"id":"mqtt-semantics","query":"MQTT 使用了哪些主题、QoS 或遗嘱消息设计？","expected_ids":[22]}
+{"id":"dht11-timing","query":"DHT11 编程需要关注哪些时序和采样限制？","expected_ids":[22]}
+{"id":"gpio-debounce","query":"GPIO 输入如何处理悬空抖动和按键去抖？","expected_ids":[23]}
+{"id":"alert-cooldown","query":"告警冷却机制怎么避免告警风暴？","expected_ids":[2,23]}
+{"id":"database-migration","query":"数据库如何支持表结构演进？","expected_ids":[23]}
+{"id":"secret-management","query":"WiFi 凭据和 Webhook 地址如何避免提交到仓库？","expected_ids":[24]}
+{"id":"future-plan","query":"项目后续计划接入哪些功能？","expected_ids":[24]}

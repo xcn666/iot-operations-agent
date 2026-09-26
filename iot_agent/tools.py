@@ -221,6 +221,16 @@ class RagIndex:
             raise FileNotFoundError(f"RAG index not found: {self.index_path}")
         payload = json.loads(self.index_path.read_text(encoding="utf-8"))
         self.chunks = payload.get("chunks", [])
+        self.chunk_terms = [self._query_terms(chunk.get("text", "")) for chunk in self.chunks]
+        document_frequency: dict[str, int] = {}
+        for terms in self.chunk_terms:
+            for term in terms:
+                document_frequency[term] = document_frequency.get(term, 0) + 1
+        document_count = max(len(self.chunks), 1)
+        self.keyword_idf = {
+            term: math.log((document_count + 1) / (frequency + 1)) + 1
+            for term, frequency in document_frequency.items()
+        }
         self.loaded = True
 
     @staticmethod
@@ -242,12 +252,15 @@ class RagIndex:
                 terms.update(cleaned[index:index + size] for index in range(max(0, len(cleaned) - size + 1)))
         return {term for term in terms if term}
 
-    @classmethod
-    def _keyword_score(cls, terms: set[str], text: str) -> float:
-        if not terms:
+    def _keyword_score(self, query_terms: set[str], text_terms: set[str]) -> float:
+        if not query_terms:
             return 0.0
-        lowered = text.lower()
-        return sum(1 for term in terms if term in lowered) / len(terms)
+        matched = query_terms & text_terms
+        if not matched:
+            return 0.0
+        total_weight = sum(self.keyword_idf.get(term, 1.0) for term in query_terms)
+        matched_weight = sum(self.keyword_idf.get(term, 1.0) for term in matched)
+        return matched_weight / total_weight if total_weight else 0.0
 
     def search(self, query: str, top_k: int | None = None) -> list[tuple[float, dict[str, Any]]]:
         if not self.loaded:
@@ -257,10 +270,10 @@ class RagIndex:
         query_vector = self.llm.embed(query)
         terms = self._query_terms(query)
         scored = []
-        for chunk in self.chunks:
+        for index, chunk in enumerate(self.chunks):
             vector_score = self._cosine(query_vector, chunk["vector"])
-            keyword_score = self._keyword_score(terms, chunk.get("text", ""))
-            score = 0.7 * vector_score + 0.3 * keyword_score
+            keyword_score = self._keyword_score(terms, self.chunk_terms[index])
+            score = 0.65 * vector_score + 0.35 * keyword_score
             scored.append((score, chunk))
         scored.sort(key=lambda item: item[0], reverse=True)
         return scored[: min(top_k or self.top_k, 10)]

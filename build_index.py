@@ -1,101 +1,230 @@
-# 06_rag_build.py - RAG 第一步：把文档切分 + 向量化 + 建成"索引库"
-#
-# 流程: 读文档 -> 切分成小块 -> 调 embedding API 转成向量 -> 保存到 rag_index.json
+"""Build the local RAG index from bundled or custom documents."""
+
+from __future__ import annotations
+
+import argparse
 import json
 import os
 import re
 import time
+from pathlib import Path
+from typing import Iterable
 
 import requests
 
-try:
-    from config import API_KEY
-except ImportError:
-    print("请先: cp config.example.py config.py 并填入 API Key")
-    raise SystemExit(1)
-
-EMBED_URL = "https://open.bigmodel.cn/api/paas/v4/embeddings"
-EMBED_MODEL = "embedding-3"
-
-DOC_PATH = os.path.expanduser("~/iot-lab/README.md")   # 被检索的文档(可改成自己的)
-INDEX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rag_index.json")
-
-CHUNK_SIZE = 220      # 每块大约多少字
-OVERLAP = 40          # 相邻块重叠字数(避免切断语义)
+ROOT = Path(__file__).resolve().parent
+DEFAULT_DOCS_DIR = ROOT / "docs" / "knowledge"
+DEFAULT_INDEX = ROOT / "rag_index.json"
+DEFAULT_EMBED_URL = "https://open.bigmodel.cn/api/paas/v4/embeddings"
+DEFAULT_EMBED_MODEL = "embedding-3"
 
 
-def split_text(text, size=CHUNK_SIZE, overlap=OVERLAP):
-    """简单切分策略: 先按段落聚合, 过长再按字数切开"""
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+def load_api_key() -> str:
+    api_key = os.getenv("GLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        try:
+            from config import API_KEY
+        except (ImportError, AttributeError) as exc:
+            raise RuntimeError(
+                "missing embedding API key; set GLM_API_KEY or create config.py from config.example.py"
+            ) from exc
+        api_key = API_KEY
+    if not api_key or "在这里填" in api_key:
+        raise RuntimeError("embedding API key is not configured")
+    return api_key
 
-    chunks = []
-    buf = ""
-    for p in paragraphs:
-        if len(buf) + len(p) + 2 <= size:
-            buf = (buf + "\n\n" + p).strip()
+
+def resolve_documents(patterns: Iterable[str] | None = None) -> list[Path]:
+    if not patterns:
+        patterns = [str(DEFAULT_DOCS_DIR)]
+
+    documents: list[Path] = []
+    for raw_pattern in patterns:
+        candidate = Path(raw_pattern).expanduser()
+        if not candidate.is_absolute():
+            candidate = ROOT / candidate
+        candidate = candidate.resolve()
+
+        if candidate.is_dir():
+            documents.extend(
+                path for path in sorted(candidate.rglob("*"))
+                if path.is_file() and path.suffix.lower() in {".md", ".txt"}
+            )
+        elif candidate.is_file():
+            documents.append(candidate)
         else:
-            if buf:
-                chunks.append(buf)
-            if len(p) <= size:
-                buf = p
-            else:
-                # 超长段落按字数切
-                start = 0
-                while start < len(p):
-                    chunks.append(p[start:start + size])
-                    start += size - overlap
-                buf = ""
-    if buf:
-        chunks.append(buf)
+            raise FileNotFoundError(f"document path not found: {candidate}")
+
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for path in documents:
+        if path not in seen:
+            unique.append(path)
+            seen.add(path)
+    if not unique:
+        raise FileNotFoundError("no markdown or text documents found")
+    return unique
+
+
+def split_text(text: str, size: int = 220, overlap: int = 40) -> list[str]:
+    """Split text into overlapping chunks while preserving paragraph boundaries."""
+    if size <= 0:
+        raise ValueError("chunk size must be positive")
+    if overlap < 0 or overlap >= size:
+        raise ValueError("overlap must be between 0 and chunk size")
+
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    normalized = re.sub(r"\n(?=#{1,6}\s)", "\n\n", normalized)
+    normalized = re.sub(r"\n(?=(?:[-*+]\s|\d+\.\s|\|))", "\n\n", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    if not normalized:
+        return []
+    paragraphs = [paragraph.strip() for paragraph in normalized.split("\n\n") if paragraph.strip()]
+
+    chunks: list[str] = []
+    buffer = ""
+    for paragraph in paragraphs:
+        if len(buffer) + len(paragraph) + 2 <= size:
+            buffer = (buffer + "\n\n" + paragraph).strip()
+            continue
+
+        if buffer:
+            chunks.append(buffer)
+        if len(paragraph) <= size:
+            buffer = paragraph
+            continue
+
+        start = 0
+        while start < len(paragraph):
+            end = min(start + size, len(paragraph))
+            chunks.append(paragraph[start:end])
+            if end == len(paragraph):
+                break
+            start += size - overlap
+        buffer = ""
+
+    if buffer:
+        chunks.append(buffer)
     return chunks
 
 
-def embed_texts(texts):
-    """批量调用 embedding 接口, 返回向量列表"""
+def iter_document_chunks(paths: Iterable[Path], size: int, overlap: int) -> Iterable[dict[str, object]]:
+    chunk_id = 0
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        relative = path.relative_to(ROOT) if ROOT in path.parents else path
+        for chunk_index, chunk in enumerate(split_text(text, size=size, overlap=overlap)):
+            yield {
+                "id": chunk_id,
+                "source": relative.as_posix(),
+                "chunk_index": chunk_index,
+                "text": chunk,
+            }
+            chunk_id += 1
+
+
+def embed_texts(
+    texts: list[str],
+    api_key: str,
+    embed_url: str,
+    embed_model: str,
+    batch_size: int,
+    timeout: int,
+) -> list[list[float]]:
     headers = {
-        "Authorization": "Bearer " + API_KEY,
+        "Authorization": "Bearer " + api_key,
         "Content-Type": "application/json",
     }
-    vectors = []
-    batch = 8                                    # 每次最多 8 条, 避免超限
-    for i in range(0, len(texts), batch):
-        part = texts[i:i + batch]
-        resp = requests.post(EMBED_URL, headers=headers,
-                             json={"model": EMBED_MODEL, "input": part}, timeout=60)
-        if resp.status_code != 200:
-            print("embedding 调用失败:", resp.status_code, resp.text[:300])
-            raise SystemExit(1)
-        data = resp.json()["data"]
-        data.sort(key=lambda d: d.get("index", 0))
-        vectors.extend([d["embedding"] for d in data])
-        print("  已向量化 {}/{} 段".format(min(i + batch, len(texts)), len(texts)))
+    vectors: list[list[float]] = []
+    for index in range(0, len(texts), batch_size):
+        batch = texts[index:index + batch_size]
+        response = requests.post(
+            embed_url,
+            headers=headers,
+            json={"model": embed_model, "input": batch},
+            timeout=timeout,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"embedding HTTP {response.status_code}: {response.text[:300]}")
+        try:
+            data = response.json()["data"]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("invalid embedding response shape") from exc
+        data.sort(key=lambda item: item.get("index", 0))
+        vectors.extend(item["embedding"] for item in data)
+        print(f"embedded {min(index + batch_size, len(texts))}/{len(texts)} chunks")
         time.sleep(0.2)
     return vectors
 
 
+def build_index(args: argparse.Namespace) -> dict[str, object]:
+    documents = resolve_documents(args.doc)
+    chunks = list(iter_document_chunks(documents, size=args.chunk_size, overlap=args.overlap))
+    if not chunks:
+        raise RuntimeError("documents produced no chunks")
+
+    api_key = load_api_key()
+    embed_url = args.embed_url or os.getenv("EMBED_URL") or DEFAULT_EMBED_URL
+    embed_model = args.embed_model or os.getenv("EMBED_MODEL") or DEFAULT_EMBED_MODEL
+    vectors = embed_texts(
+        [str(chunk["text"]) for chunk in chunks],
+        api_key=api_key,
+        embed_url=embed_url,
+        embed_model=embed_model,
+        batch_size=args.batch_size,
+        timeout=args.timeout,
+    )
+    if len(vectors) != len(chunks):
+        raise RuntimeError("embedding count does not match chunk count")
+
+    for chunk, vector in zip(chunks, vectors):
+        chunk["vector"] = vector
+
+    index = {
+        "model": embed_model,
+        "documents": [
+            {"path": str(path.relative_to(ROOT) if ROOT in path.parents else path), "size": path.stat().st_size}
+            for path in documents
+        ],
+        "chunks": chunks,
+    }
+    output = Path(args.output).expanduser()
+    if not output.is_absolute():
+        output = ROOT / output
+    output.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+    return {
+        "output": str(output),
+        "documents": len(documents),
+        "chunks": len(chunks),
+        "vector_dimension": len(vectors[0]),
+        "model": embed_model,
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Build a reproducible local RAG index.")
+    parser.add_argument(
+        "--doc",
+        action="append",
+        help="Markdown/text file or directory. Repeat for multiple sources. Defaults to docs/knowledge/.",
+    )
+    parser.add_argument("--output", default=str(DEFAULT_INDEX), help="Output index path.")
+    parser.add_argument("--chunk-size", type=int, default=220)
+    parser.add_argument("--overlap", type=int, default=40)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--timeout", type=int, default=60)
+    parser.add_argument("--embed-url", default="")
+    parser.add_argument("--embed-model", default="")
+    return parser.parse_args()
+
+
+def main() -> None:
+    try:
+        summary = build_index(parse_args())
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
 if __name__ == "__main__":
-    print("=" * 52)
-    print("RAG 建库：文档 → 切分 → 向量化 → 索引")
-    print("=" * 52)
-    print("读取文档:", DOC_PATH)
-    with open(DOC_PATH, encoding="utf-8") as f:
-        text = f.read()
-    print("文档长度:", len(text), "字符")
-
-    chunks = split_text(text)
-    print("切分成", len(chunks), "个片段")
-    for i, c in enumerate(chunks[:3], 1):
-        print("  片段{}: {}".format(i, c[:60].replace("\n", " ") + "..."))
-
-    print("\n开始向量化（调用 embedding 接口）...")
-    vectors = embed_texts(chunks)
-    print("向量维度:", len(vectors[0]))
-
-    index = [{"id": i, "text": c, "vector": v} for i, (c, v) in enumerate(zip(chunks, vectors))]
-    with open(INDEX_PATH, "w", encoding="utf-8") as f:
-        json.dump({"model": EMBED_MODEL, "chunks": index}, f, ensure_ascii=False)
-
-    size_kb = os.path.getsize(INDEX_PATH) / 1024
-    print("\n索引已保存:", INDEX_PATH, "({:.1f} KB)".format(size_kb))
-    print("下一步: 运行 07_rag_query.py 提问")
+    main()
