@@ -16,3 +16,4 @@ eval/results*.json
 # local virtual environments
 .venv/
 venv/
+eval/rag_results.json

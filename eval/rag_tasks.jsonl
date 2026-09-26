@@ -1,0 +1,10 @@
+{"id":"mqtt-reconnect","query":"MQTT 断线之后怎么重连？","expected_ids":[2,29]}
+{"id":"alert-cooldown","query":"告警冷却机制怎么避免告警风暴？","expected_ids":[2,29]}
+{"id":"database-tables","query":"项目使用什么数据库，保存了哪些表？","expected_ids":[1,2,12]}
+{"id":"hardware-capture","query":"真实硬件如何采集温湿度？","expected_ids":[1,10,22]}
+{"id":"wifi-mqtt-upload","query":"ESP32 怎样通过 WiFi 和 MQTT 上报数据？","expected_ids":[1,5,20]}
+{"id":"webhook-alert","query":"告警如何推送到钉钉或企业微信？","expected_ids":[2,18,25]}
+{"id":"offline-resend","query":"断网期间数据如何缓存和恢复补发？","expected_ids":[2,29]}
+{"id":"mqtt-semantics","query":"MQTT 使用了哪些主题、QoS 或遗嘱消息设计？","expected_ids":[28]}
+{"id":"dht11-wiring","query":"DHT11 的接线和 GPIO 是什么？","expected_ids":[10,11,22]}
+{"id":"dashboard-content","query":"Flask 和 Chart.js 大屏展示哪些内容？","expected_ids":[1,2,12,20]}

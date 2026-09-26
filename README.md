@@ -4,6 +4,8 @@
 
 ![演示](docs/demo.png)
 
+演示覆盖多步工具调用、RAG 来源展示与写操作确认流程。
+
 ## 核心能力
 
 - **多步决策**：Planner 每一步只选择一个动作，读取工具结果后继续规划，直到能够给出结论。
@@ -129,6 +131,14 @@ python3 eval/run_eval.py
 
 评估集位于 `eval/tasks.jsonl`，建议继续扩展到 30 条以上，并增加真实失败案例。
 
+RAG 检索单独评测：
+
+```bash
+python3 eval/run_rag_eval.py
+```
+
+最新结果见 `eval/RAG_RESULTS.md`：在 10 条人工标注问题上，`Recall@3 = 80%`，`MRR = 0.6333`。该结果用于开发期回归，不代表生产环境检索质量。
+
 ## 项目结构
 
 ```text
@@ -143,7 +153,10 @@ iot_agent/
 └── web.py        # Flask API
 eval/
 ├── run_eval.py
-└── tasks.jsonl
+├── tasks.jsonl
+├── run_rag_eval.py
+├── rag_tasks.jsonl
+└── RAG_RESULTS.md
 tests/
 └── test_agent.py
 ```
