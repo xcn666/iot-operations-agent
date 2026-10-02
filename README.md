@@ -6,6 +6,8 @@
 
 演示覆盖多步工具调用、RAG 来源展示与写操作确认流程。
 
+[查看 39 秒带配音演示视频](https://github.com/xcn666/iot-operations-agent/releases/download/demo-v1/iot-operations-agent-demo.mp4)
+
 ## 核心能力
 
 - **多步决策**：Planner 每一步只选择一个动作，读取工具结果后继续规划，直到能够给出结论。
