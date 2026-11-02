@@ -87,7 +87,7 @@ python3 app.py
 
 打开 `http://localhost:5001`。
 
-这里把监测系统与 Agent 自身的 README 一起切分并向量化，检索结果会保留来源文件。也可以使用环境变量而不是 `config.py`：
+`build_index.py` 默认索引仓库内的 `docs/knowledge/`；上述命令还将 Agent 的 `README.md` 加入索引，并为每个片段保留来源。需要时可重复使用 `--doc` 加入其他 Markdown/TXT 文件或目录。也可以使用环境变量而不是 `config.py`：
 
 ```bash
 export GLM_API_KEY="..."
@@ -95,7 +95,6 @@ export GLM_API_URL="https://open.bigmodel.cn/api/paas/v4/chat/completions"
 export GLM_MODEL="glm-4-flash"
 export IOT_MONITOR_API_URL="http://127.0.0.1:5002"
 export IOT_MONITOR_API_TOKEN="与监测服务相同的随机令牌"
-export IOT_DOCS_PATHS="$HOME/iot-lab/README.md:$(pwd)/README.md"
 ```
 
 ## Docker
