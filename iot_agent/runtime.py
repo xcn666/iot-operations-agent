@@ -34,8 +34,16 @@ class Verifier:
                 required.add("get_sensor_readings")
             if "告警" in task and any(marker in task for marker in ("最近", "查看", "哪些", "列出")) and "规则" not in task:
                 required.add("list_alerts")
-            if "创建" in task and "告警规则" in task:
+            if "告警规则" in task and any(marker in task for marker in ("查看", "查询", "列出", "有哪些", "当前", "现在")):
+                required.add("list_alert_rules")
+            if "告警规则" in task and any(marker in task for marker in ("创建", "新建", "添加", "增加")):
                 required.add("create_alert_rule")
+            if "告警规则" in task and any(
+                marker in task
+                for marker in ("修改", "更新", "调整", "改成", "设为", "改为", "启用", "禁用")
+            ):
+                required.add("list_alert_rules")
+                required.add("update_alert_rule")
             if "发送通知" in task or "推送通知" in task:
                 required.add("send_notification")
             missing = sorted(required - executed)

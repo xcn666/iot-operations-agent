@@ -34,6 +34,7 @@ class Planner:
             "You are an IoT Operations Agent. Solve the user task step by step. "
             "Call exactly one tool per turn, inspect the result, then decide the next action. "
             "Never invent sensor values or documentation. Use get_sensor_stats for row count and simple max/min/average. Use analyze_trend for trends or threshold anomaly counts. Use finish only after the task is satisfied. "
+            "Use list_alert_rules to find existing rule IDs before updating one. For updates, preserve unspecified fields from the listed rule. An omitted device_id means the rule applies globally. "
             "Use ask_user when required information is missing. "
             "Write tools require explicit confirmation and the runtime will pause automatically. "
             f"Current local time: {now}. Available tools: {', '.join(tools)}. "
@@ -53,6 +54,12 @@ class Planner:
                 "executed_steps": state.step_count,
             },
             ensure_ascii=False,
+        )
+
+    @staticmethod
+    def _needs_alert_rule_update(task: str) -> bool:
+        return "告警规则" in task and any(
+            marker in task for marker in ("修改", "更新", "调整", "改成", "改为", "设为", "启用", "禁用")
         )
 
     def _control_tools(self) -> list[dict[str, Any]]:
@@ -120,6 +127,8 @@ class Planner:
     @staticmethod
     def _decompose_task(task: str) -> list[dict[str, Any]]:
         field = "hum" if "湿度" in task else "temp"
+        if Planner._needs_alert_rule_update(task):
+            return [{"tool": "list_alert_rules", "args": {}}]
         threshold_match = re.search(r"(?:超过|高于|大于)\s*(\d+(?:\.\d+)?)", task)
         trend_args: dict[str, Any] = {"field": field}
         if threshold_match:
@@ -153,7 +162,9 @@ class Planner:
             return None
         if "并" in task and "趋势" not in task:
             return None
-        if any(word in task for word in ("创建", "告警规则")):
+        if "告警规则" in task and any(
+            word in task for word in ("创建", "新建", "添加", "修改", "更新", "调整", "改成", "设为")
+        ):
             return None
         if any(phrase in task for phrase in ("这个设备", "该设备", "本设备")):
             return None
@@ -163,6 +174,14 @@ class Planner:
                 kind=DecisionKind.CALL_TOOL,
                 tool_name="send_notification",
                 args={"text": text},
+                source="rule",
+                terminal=True,
+            )
+        if "告警规则" in task and any(word in task for word in ("查看", "查询", "列出", "有哪些", "当前", "现在")):
+            return Decision(
+                kind=DecisionKind.CALL_TOOL,
+                tool_name="list_alert_rules",
+                args={},
                 source="rule",
                 terminal=True,
             )
@@ -233,24 +252,26 @@ class Planner:
             )
         if state.plan_queue:
             queued = state.plan_queue.pop(0)
+            terminal = not state.plan_queue and not self._needs_alert_rule_update(state.task)
             return Decision(
                 kind=DecisionKind.CALL_TOOL,
                 tool_name=queued["tool"],
                 args=queued.get("args", {}),
                 source="decomposition",
-                terminal=not state.plan_queue,
+                terminal=terminal,
             )
         if state.step_count == 0:
             plan = self._decompose_task(state.task)
             if plan:
                 first = plan.pop(0)
                 state.plan_queue = plan
+                terminal = not plan and not self._needs_alert_rule_update(state.task)
                 return Decision(
                     kind=DecisionKind.CALL_TOOL,
                     tool_name=first["tool"],
                     args=first.get("args", {}),
                     source="decomposition",
-                    terminal=not plan,
+                    terminal=terminal,
                 )
             rule_decision = self._rule_based_decision(state.task)
             if rule_decision:

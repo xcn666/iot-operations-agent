@@ -31,8 +31,8 @@ class BuildIndexTests(unittest.TestCase):
             second.write_text("第三段", encoding="utf-8")
             chunks = list(iter_document_chunks([first, second], size=220, overlap=20))
         self.assertEqual([chunk["id"] for chunk in chunks], [0, 1])
-        self.assertEqual(chunks[0]["source"], str(first))
-        self.assertEqual(chunks[1]["source"], str(second))
+        self.assertEqual(chunks[0]["source"], first.as_posix())
+        self.assertEqual(chunks[1]["source"], second.as_posix())
 
 
 if __name__ == "__main__":

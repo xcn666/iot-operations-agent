@@ -1,5 +1,7 @@
 # Evaluation Results
 
+> This result predates the HTTP API integration. It is a historical local smoke run and does not measure the integrated version. Re-run the evaluation with the monitor API and matching token configured before citing it as a current result.
+
 ## Latest run
 
 - Date: 2026-09-20

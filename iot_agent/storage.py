@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ class AgentStore:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS agent_sessions (
@@ -51,7 +52,7 @@ class AgentStore:
 
     def save(self, state: AgentState) -> None:
         payload = json.dumps(state.to_dict(), ensure_ascii=False)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
                 INSERT INTO agent_sessions(session_id, task, status, state_json, created_at, updated_at)
@@ -73,7 +74,7 @@ class AgentStore:
             )
 
     def load(self, session_id: str) -> AgentState | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 "SELECT state_json FROM agent_sessions WHERE session_id = ?",
                 (session_id,),
@@ -84,7 +85,7 @@ class AgentStore:
 
     def create_pending(self, session_id: str, tool_name: str, args: dict[str, Any], created_at: str) -> str:
         token = uuid.uuid4().hex
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
                 INSERT INTO pending_actions(token, session_id, tool_name, args_json, status, created_at)
@@ -95,7 +96,7 @@ class AgentStore:
         return token
 
     def get_pending(self, token: str) -> dict[str, Any] | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 "SELECT * FROM pending_actions WHERE token = ?",
                 (token,),
@@ -115,7 +116,7 @@ class AgentStore:
     def mark_pending(self, token: str, status: str, executed_at: str) -> None:
         if status not in {"executed", "rejected", "failed"}:
             raise ValueError("invalid pending action status")
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 "UPDATE pending_actions SET status = ?, executed_at = ? WHERE token = ? AND status = 'pending'",
                 (status, executed_at, token),

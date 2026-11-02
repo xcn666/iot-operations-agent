@@ -4,9 +4,10 @@ from __future__ import annotations
 import json
 import math
 import re
-import sqlite3
 import time
 import urllib.request
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from datetime import datetime
@@ -108,42 +109,42 @@ def validate_arguments(schema: dict[str, Any], args: dict[str, Any]) -> None:
                     raise ToolValidationError(f"{name} must be ISO datetime") from exc
 
 
-def _connect_readonly(path: Path) -> sqlite3.Connection:
-    uri = f"file:{path}?mode=ro"
-    connection = sqlite3.connect(uri, uri=True, timeout=10)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
-def _parse_temporal(value: str) -> tuple[str, str | None]:
-    normalized = value.strip().replace("T", " ")
-    if len(normalized) == 10:
-        datetime.strptime(normalized, "%Y-%m-%d")
-        return normalized, None
-    parsed = datetime.fromisoformat(normalized)
-    return parsed.strftime("%Y-%m-%d"), parsed.strftime("%H:%M:%S")
-
-
-def _temporal_where(start: str | None, end: str | None) -> tuple[list[str], list[Any]]:
-    clauses: list[str] = []
-    params: list[Any] = []
-    if start:
-        day, clock = _parse_temporal(start)
-        if clock is None:
-            clauses.append("day >= ?")
-            params.append(day)
-        else:
-            clauses.append("(day > ? OR (day = ? AND time >= ?))")
-            params.extend([day, day, clock])
-    if end:
-        day, clock = _parse_temporal(end)
-        if clock is None:
-            clauses.append("day <= ?")
-            params.append(day)
-        else:
-            clauses.append("(day < ? OR (day = ? AND time <= ?))")
-            params.extend([day, day, clock])
-    return clauses, params
+def _monitor_request(
+    settings: Settings,
+    method: str,
+    route: str,
+    params: dict[str, Any] | None = None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not settings.monitor_api_token:
+        raise RuntimeError("IOT_MONITOR_API_TOKEN is not configured")
+    query = urlencode({key: value for key, value in (params or {}).items() if value is not None})
+    url = settings.monitor_api_url.rstrip("/") + route
+    if query:
+        url += "?" + query
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
+    headers = {
+        "Authorization": f"Bearer {settings.monitor_api_token}",
+        "Accept": "application/json",
+    }
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=settings.tool_timeout_seconds) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        try:
+            message = json.loads(body).get("error", body)
+        except json.JSONDecodeError:
+            message = body
+        raise RuntimeError(f"monitor API returned {exc.code}: {message}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"monitor API unavailable: {exc.reason}") from exc
+    if not isinstance(result, dict):
+        raise RuntimeError("monitor API returned an invalid response")
+    return result
 
 
 class ToolRegistry:
@@ -286,54 +287,44 @@ def build_default_registry(settings: Settings, llm: Any) -> ToolRegistry:
     def get_sensor_stats(args: dict[str, Any]) -> ToolResult:
         metric = args.get("metric", "max")
         field = args.get("field", "temp")
-        device_id = args.get("device_id")
-        start = args.get("start")
-        end = args.get("end")
-        function = {"max": "MAX", "min": "MIN", "avg": "AVG", "count": "COUNT"} [metric]
-        expression = "COUNT(*)" if metric == "count" else f"ROUND({function}({field}), 2)"
-        clauses, params = _temporal_where(start, end)
-        if device_id:
-            clauses.append("device = ?")
-            params.append(device_id)
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        sql = f"SELECT {expression}, COUNT(*) FROM readings{where}"
-        with _connect_readonly(settings.sensor_db_path) as connection:
-            value, count = connection.execute(sql, params).fetchone()
+        result = _monitor_request(
+            settings,
+            "GET",
+            "/api/agent/stats",
+            {key: args.get(key) for key in ("metric", "field", "device_id", "start", "end")},
+        )
         return ToolResult(
             ok=True,
-            data={"metric": metric, "field": field, "value": value, "sample_count": count},
-            summary=f"{field} {metric}={value}, samples={count}",
+            data=result,
+            summary=f"{field} {metric}={result.get('value')}, samples={result.get('sample_count')}",
         )
 
     def get_sensor_readings(args: dict[str, Any]) -> ToolResult:
         limit = int(args.get("limit", 20))
-        clauses, params = _temporal_where(args.get("start"), args.get("end"))
-        if args.get("device_id"):
-            clauses.append("device = ?")
-            params.append(args["device_id"])
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        sql = "SELECT day, time, device, temp, hum FROM readings" + where + " ORDER BY day DESC, time DESC LIMIT ?"
-        params.append(limit)
-        with _connect_readonly(settings.sensor_db_path) as connection:
-            rows = [dict(row) for row in connection.execute(sql, params)]
+        result = _monitor_request(
+            settings,
+            "GET",
+            "/api/agent/readings",
+            {key: args.get(key) for key in ("device_id", "start", "end")} | {"limit": limit},
+        )
+        rows = result.get("rows", [])
         return ToolResult(
             ok=True,
-            data={"rows": rows, "returned": len(rows)},
+            data=result,
             summary=f"returned {len(rows)} sensor readings",
         )
 
     def analyze_trend(args: dict[str, Any]) -> ToolResult:
         field = args.get("field", "temp")
         threshold = args.get("threshold")
-        clauses, params = _temporal_where(args.get("start"), args.get("end"))
-        if args.get("device_id"):
-            clauses.append("device = ?")
-            params.append(args["device_id"])
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        sql = f"SELECT day, time, {field} AS value FROM readings{where} ORDER BY day ASC, time ASC LIMIT 5000"
-        with _connect_readonly(settings.sensor_db_path) as connection:
-            rows = connection.execute(sql, params).fetchall()
-        values = [float(row["value"]) for row in rows if row["value"] is not None]
+        result = _monitor_request(
+            settings,
+            "GET",
+            "/api/agent/readings",
+            {key: args.get(key) for key in ("device_id", "start", "end")} | {"limit": 5000},
+        )
+        rows = list(reversed(result.get("rows", [])))
+        values = [float(row[field]) for row in rows if row.get(field) is not None]
         if not values:
             return ToolResult(ok=True, data={"sample_count": 0}, summary="no readings in range")
         count = len(values)
@@ -345,15 +336,16 @@ def build_default_registry(settings: Settings, llm: Any) -> ToolRegistry:
             denominator = sum((index - x_mean) ** 2 for index in range(count))
             slope = numerator / denominator if denominator else 0.0
         anomalies = [value for value in values if threshold is not None and value > threshold]
-        first_row, last_row = rows[0], rows[-1]
+        first_row = next(row for row in rows if row.get(field) is not None)
+        last_row = next(row for row in reversed(rows) if row.get(field) is not None)
         data = {
             "field": field,
             "sample_count": count,
             "minimum": round(min(values), 2),
             "maximum": round(max(values), 2),
             "average": round(mean, 2),
-            "first": {"day": first_row["day"], "time": first_row["time"], "value": first_row["value"]},
-            "last": {"day": last_row["day"], "time": last_row["time"], "value": last_row["value"]},
+            "first": {"day": first_row["day"], "time": first_row["time"], "value": first_row[field]},
+            "last": {"day": last_row["day"], "time": last_row["time"], "value": last_row[field]},
             "delta": round(values[-1] - values[0], 2),
             "slope_per_sample": round(slope, 4),
             "threshold": threshold,
@@ -362,18 +354,22 @@ def build_default_registry(settings: Settings, llm: Any) -> ToolRegistry:
         return ToolResult(ok=True, data=data, summary=f"analyzed {count} samples")
 
     def list_alerts(args: dict[str, Any]) -> ToolResult:
-        limit = int(args.get("limit", 10))
-        clauses: list[str] = []
-        params: list[Any] = []
-        if args.get("device_id"):
-            clauses.append("device = ?")
-            params.append(args["device_id"])
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        sql = "SELECT time, temp, threshold, device FROM alerts" + where + " ORDER BY id DESC LIMIT ?"
-        params.append(limit)
-        with _connect_readonly(settings.sensor_db_path) as connection:
-            rows = [dict(row) for row in connection.execute(sql, params)]
-        return ToolResult(ok=True, data={"alerts": rows, "returned": len(rows)}, summary=f"returned {len(rows)} alerts")
+        result = _monitor_request(
+            settings,
+            "GET",
+            "/api/agent/alerts",
+            {key: args.get(key) for key in ("device_id", "limit")},
+        )
+        return ToolResult(ok=True, data=result, summary=f"returned {result.get('returned', 0)} alerts")
+
+    def list_alert_rules(args: dict[str, Any]) -> ToolResult:
+        result = _monitor_request(
+            settings,
+            "GET",
+            "/api/agent/alert-rules",
+            {"device_id": args.get("device_id")},
+        )
+        return ToolResult(ok=True, data=result, summary=f"returned {result.get('returned', 0)} alert rules")
 
     def search_iot_docs(args: dict[str, Any]) -> ToolResult:
         query = args["query"].strip()
@@ -384,6 +380,7 @@ def build_default_registry(settings: Settings, llm: Any) -> ToolRegistry:
             "sources": [
                 {
                     "id": chunk.get("id"),
+                    "source": chunk.get("source"),
                     "score": round(score, 4),
                     "text": chunk.get("text", ""),
                 }
@@ -393,38 +390,61 @@ def build_default_registry(settings: Settings, llm: Any) -> ToolRegistry:
         return ToolResult(ok=True, data=data, summary=f"retrieved {len(results)} document chunks")
 
     def create_alert_rule(args: dict[str, Any]) -> ToolResult:
-        settings.sensor_db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(settings.sensor_db_path) as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS alert_rules (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    device TEXT,
-                    field TEXT NOT NULL,
-                    operator TEXT NOT NULL,
-                    threshold REAL NOT NULL,
-                    cooldown_sec INTEGER NOT NULL,
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    created_at TEXT NOT NULL
-                )
-                """
-            )
-            cursor = connection.execute(
-                """
-                INSERT INTO alert_rules(device, field, operator, threshold, cooldown_sec, enabled, created_at)
-                VALUES (?, ?, ?, ?, ?, 1, ?)
-                """,
-                (
-                    args.get("device_id"),
-                    args["field"],
-                    args["operator"],
-                    args["threshold"],
-                    args["cooldown_sec"],
-                    datetime.now().isoformat(timespec="seconds"),
-                ),
-            )
-            rule_id = cursor.lastrowid
-        return ToolResult(ok=True, data={"rule_id": rule_id}, summary=f"created alert rule #{rule_id}")
+        payload = {
+            "device_id": args.get("device_id"),
+            "field": args["field"],
+            "operator": args["operator"],
+            "threshold": args["threshold"],
+            "cooldown_sec": args["cooldown_sec"],
+        }
+        response = _monitor_request(settings, "POST", "/api/agent/alert-rules", payload=payload)
+        rule = response.get("rule") or {}
+        verified = _verify_alert_rule(settings, rule)
+        return ToolResult(
+            ok=True,
+            data={"rule": verified},
+            summary=f"created and verified alert rule #{rule.get('id')}",
+        )
+
+    def update_alert_rule(args: dict[str, Any]) -> ToolResult:
+        current = _monitor_request(settings, "GET", "/api/agent/alert-rules")
+        existing = next(
+            (item for item in current.get("rules", []) if item.get("id") == args["rule_id"]),
+            None,
+        )
+        if existing is None:
+            raise RuntimeError(f"alert rule #{args['rule_id']} does not exist")
+        payload = {
+            "device_id": args.get("device_id", existing.get("device")),
+            "field": args.get("field", existing["field"]),
+            "operator": args.get("operator", existing["operator"]),
+            "threshold": args.get("threshold", existing["threshold"]),
+            "cooldown_sec": args.get("cooldown_sec", existing["cooldown_sec"]),
+            "enabled": args.get("enabled", bool(existing["enabled"])),
+        }
+        response = _monitor_request(
+            settings,
+            "PUT",
+            f"/api/agent/alert-rules/{args['rule_id']}",
+            payload=payload,
+        )
+        rule = response.get("rule") or {}
+        verified = _verify_alert_rule(settings, rule)
+        return ToolResult(
+            ok=True,
+            data={"rule": verified},
+            summary=f"updated and verified alert rule #{rule.get('id')}",
+        )
+
+    def _verify_alert_rule(settings: Settings, rule: dict[str, Any]) -> dict[str, Any]:
+        rule_id = rule.get("id")
+        if not isinstance(rule_id, int):
+            raise RuntimeError("monitor API did not return an alert rule ID")
+        current = _monitor_request(settings, "GET", "/api/agent/alert-rules")
+        verified = next((item for item in current.get("rules", []) if item.get("id") == rule_id), None)
+        if verified != rule:
+            raise RuntimeError(f"alert rule #{rule_id} could not be verified after the write")
+        return verified
 
     def send_notification(args: dict[str, Any]) -> ToolResult:
         text = args["text"].strip()
@@ -513,6 +533,18 @@ def build_default_registry(settings: Settings, llm: Any) -> ToolRegistry:
     )
     registry.register(
         ToolSpec(
+            name="list_alert_rules",
+            description="List configured alert rules, optionally for one device. An omitted device ID includes global rules.",
+            parameters={
+                "type": "object",
+                "properties": {"device_id": {"type": ["string", "null"]}},
+                "additionalProperties": False,
+            },
+            handler=list_alert_rules,
+        )
+    )
+    registry.register(
+        ToolSpec(
             name="search_iot_docs",
             description="Search IoT project documentation with vector retrieval.",
             parameters={
@@ -544,6 +576,29 @@ def build_default_registry(settings: Settings, llm: Any) -> ToolRegistry:
                 "additionalProperties": False,
             },
             handler=create_alert_rule,
+            permission="write",
+            requires_confirmation=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="update_alert_rule",
+            description="Update an existing alert rule by ID. Only supplied fields change. This write operation requires confirmation.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "rule_id": {"type": "integer", "minimum": 1},
+                    "device_id": {"type": ["string", "null"]},
+                    "field": {"type": "string", "enum": ["temp", "hum"]},
+                    "operator": {"type": "string", "enum": ["gt", "gte", "lt", "lte"]},
+                    "threshold": {"type": "number", "minimum": -100, "maximum": 200},
+                    "cooldown_sec": {"type": "integer", "minimum": 10, "maximum": 86400},
+                    "enabled": {"type": "boolean"},
+                },
+                "required": ["rule_id"],
+                "additionalProperties": False,
+            },
+            handler=update_alert_rule,
             permission="write",
             requires_confirmation=True,
         )
